@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.15.0/.schema/devbox.schema.json",
+  "packages": [
+    "go@latest",
+    "go-task@latest",
+    "kind@latest"
+  ],
+  "shell": {
+    "scripts": {
+      "ci": [
+        "task ci"
+      ]
+    }
+  }
+}

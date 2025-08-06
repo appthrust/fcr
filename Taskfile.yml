@@ -1,0 +1,51 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  cluster_name: test
+
+tasks:
+  generate:
+    desc: Generate code for the project
+    silent: true
+    cmds:
+      - task: generate:deepcopy
+      - task: generate:manifests
+
+  generate:deepcopy:
+    desc: Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+    cmd: go tool controller-gen object paths="./internal/api/..."
+
+  generate:manifests:
+    desc: Generate Kubernetes CRDs
+    cmd: go tool controller-gen crd paths="./internal/api/..." output:dir=internal/manifests
+
+  cluster:create:
+    desc: Create a Kubernetes cluster
+    cmd: kind create cluster --name {{.cluster_name}}
+
+  cluster:delete:
+    desc: Delete a Kubernetes cluster
+    cmd: kind delete cluster --name {{.cluster_name}}
+
+  cluster:create-if-not-exists:
+    desc: Create a Kubernetes cluster if it does not exist
+    cmd: kind get clusters | grep -q {{.cluster_name}} || task cluster:create
+
+  ci:
+    desc: Run continuous integration checks
+    cmds:
+      - go mod download
+      - task: lint
+      - task: test
+
+  lint:
+    desc: Run linting checks
+    cmd: go tool golangci-lint run
+
+  test:
+    desc: Run tests
+    cmds:
+      - task: cluster:create-if-not-exists
+      - go test -v -race ./...
