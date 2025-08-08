@@ -5,7 +5,9 @@ import (
 	"context"
 
 	ET "github.com/IBM/fp-go/either"
+	F "github.com/IBM/fp-go/function"
 	IOE "github.com/IBM/fp-go/ioeither"
+	O "github.com/IBM/fp-go/option"
 	RIOE "github.com/IBM/fp-go/readerioeither"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -49,6 +51,21 @@ func Get[T any, OP ObjectPointer[T]](p GetParams) ReaderIOEither[OP] {
 		ptr := OP(&obj) // Cast to the pointer type
 		return ptr, env.Client.Get(env.Ctx, p.key, ptr, p.opts...)
 	})
+}
+
+// GetOption performs a [Get] and converts a not-found result into None.
+//
+// It composes [Get] with [IgnoreNotFound] to return ReaderIOEither[option.Option[OP]] such that:
+//   - on success, the fetched object is wrapped in Some,
+//   - if the object does not exist (IsNotFound), it yields None instead of an error,
+//   - other errors are propagated unchanged.
+//
+// Use when the absence of a resource is an expected outcome.
+func GetOption[T any, OP ObjectPointer[T]](p GetParams) ReaderIOEither[O.Option[OP]] {
+	return F.Pipe1(
+		Get[T, OP](p),
+		IgnoreNotFound,
+	)
 }
 
 // ListParams contains parameters for List operations.
@@ -199,6 +216,29 @@ func StatusPatch(p StatusPatchParams) ReaderIOEither[Unit] {
 	})
 }
 
+// IgnoreNotFound turns NotFound errors into None.
+//
+// It converts a ReaderIOEither[OP] into ReaderIOEither[option.Option[OP]] such that:
+//   - on success, the object is wrapped in Some,
+//   - if the error is considered not found by [client.IgnoreNotFound], it yields None,
+//   - for any other error, the error is propagated unchanged.
+//
+// Typically used after [Get] when the absence of a resource is not exceptional.
+func IgnoreNotFound[T any, OP ObjectPointer[T]](rioe ReaderIOEither[OP]) ReaderIOEither[O.Option[OP]] {
+	return F.Pipe2(
+		rioe,
+		RIOE.Map[Env, error](O.Some[OP]),
+		RIOE.OrElse(
+			func(err error) ReaderIOEither[O.Option[OP]] {
+				if client.IgnoreNotFound(err) == nil {
+					return rioeRight(O.None[OP]())
+				}
+				return rioeLeft[O.Option[OP]](err)
+			},
+		),
+	)
+}
+
 // ObjectPointer is a type that constraints T to be a pointer type and implements [client.Object].
 type ObjectPointer[T any] interface {
 	client.Object // Rule 1: T must implement client.Object
@@ -217,4 +257,12 @@ func readerize[T any](f func(env Env) (T, error)) ReaderIOEither[T] {
 			return f(env)
 		})
 	}
+}
+
+func rioeRight[T any](x T) ReaderIOEither[T] {
+	return RIOE.Right[Env, error](x)
+}
+
+func rioeLeft[T any](err error) ReaderIOEither[T] {
+	return RIOE.Left[Env, T](err)
 }
