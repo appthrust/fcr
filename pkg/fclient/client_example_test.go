@@ -134,3 +134,96 @@ func ExampleIgnoreNotFound() {
 	// Example 2: Right(None)
 	// Example 3: Left(*errors.StatusError)
 }
+
+func ExampleListItems() {
+	resultToStr := func(result ET.Either[error, []*corev1.ConfigMap]) string {
+		return ET.Fold(
+			func(err error) string { return fmt.Sprintf("Left(%T)", err) },
+			func(configMaps []*corev1.ConfigMap) string {
+				return fmt.Sprintf("Right([]*v1.ConfigMap with %d items)", len(configMaps))
+			},
+		)(result)
+	}
+
+	// Setup client
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		// Emulate that the API has multiple configmaps
+		WithObjects(
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config1", Namespace: "default"}},
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config2", Namespace: "default"}},
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config3", Namespace: "kube-system"}},
+		).
+		Build()
+
+	// Setup environment for reader monad
+	env := fclient.Env{Ctx: context.TODO(), Client: cl}
+
+	// Example 1: List all configmaps in default namespace
+	params1 := fclient.ToListParams(client.InNamespace("default"))
+	result1 := fclient.ListItems[corev1.ConfigMap, corev1.ConfigMapList](params1)(env)()
+	fmt.Printf("Example 1: %s\n", resultToStr(result1))
+
+	// Example 2: List all configmaps across all namespaces
+	params2 := fclient.ToListParams()
+	result2 := fclient.ListItems[corev1.ConfigMap, corev1.ConfigMapList](params2)(env)()
+	fmt.Printf("Example 2: %s\n", resultToStr(result2))
+
+	// Example 3: List configmaps with label selector (none exist with this label)
+	params3 := fclient.ToListParams(client.MatchingLabels(map[string]string{"app": "nonexistent"}))
+	result3 := fclient.ListItems[corev1.ConfigMap, corev1.ConfigMapList](params3)(env)()
+	fmt.Printf("Example 3: %s\n", resultToStr(result3))
+
+	// Output:
+	// Example 1: Right([]*v1.ConfigMap with 2 items)
+	// Example 2: Right([]*v1.ConfigMap with 3 items)
+	// Example 3: Right([]*v1.ConfigMap with 0 items)
+}
+
+func ExamplePickListItems() {
+	resultToStr := func(result ET.Either[error, []*corev1.ConfigMap]) string {
+		return ET.Fold(
+			func(err error) string { return fmt.Sprintf("Left(%T)", err) },
+			func(configMaps []*corev1.ConfigMap) string {
+				return fmt.Sprintf("Right([]*v1.ConfigMap with %d items)", len(configMaps))
+			},
+		)(result)
+	}
+
+	// Setup client
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		// Emulate that the API has multiple configmaps
+		WithObjects(
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config1", Namespace: "default"}},
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config2", Namespace: "default"}},
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config3", Namespace: "kube-system"}},
+		).
+		Build()
+
+	// Setup environment for reader monad
+	env := fclient.Env{Ctx: context.TODO(), Client: cl}
+
+	// Setup list parameters
+	params := fclient.ToListParams(client.InNamespace("default"))
+
+	// Example 1: Use PickListItems to transform List result
+	listResult := fclient.List[corev1.ConfigMapList](params)
+	pickResult := fclient.PickListItems[corev1.ConfigMap](listResult)(env)()
+	fmt.Printf("Example 1: %s\n", resultToStr(pickResult))
+
+	// Example 2: Use PickListItems with F.Pipe1 for composition
+	composedResult := F.Pipe1(
+		fclient.List[corev1.ConfigMapList](params),
+		fclient.PickListItems[corev1.ConfigMap],
+	)(env)()
+	fmt.Printf("Example 2: %s\n", resultToStr(composedResult))
+
+	// Output:
+	// Example 1: Right([]*v1.ConfigMap with 2 items)
+	// Example 2: Right([]*v1.ConfigMap with 2 items)
+}

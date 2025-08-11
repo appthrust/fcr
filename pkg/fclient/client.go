@@ -9,6 +9,8 @@ import (
 	IOE "github.com/IBM/fp-go/ioeither"
 	O "github.com/IBM/fp-go/option"
 	RIOE "github.com/IBM/fp-go/readerioeither"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -85,6 +87,31 @@ func List[T any, OLP ObjectListPointer[T]](p ListParams) ReaderIOEither[OLP] {
 		ptr := OLP(&obj) // Cast to the pointer type
 		return ptr, env.Client.List(env.Ctx, ptr, p.opts...)
 	})
+}
+
+// ListItems retrieves a list of Kubernetes objects and returns a list of pointers to the objects.
+func ListItems[O any, OL any, OP ObjectPointer[O], OLP ObjectListPointer[OL]](p ListParams) ReaderIOEither[[]OP] {
+	return F.Pipe1(
+		List[OL, OLP](p),
+		PickListItems[O, OL, OP, OLP],
+	)
+}
+
+// PickListItems extracts the items from a Kubernetes list object.
+func PickListItems[O any, OL any, OP ObjectPointer[O], OLP ObjectListPointer[OL]](rioe ReaderIOEither[OLP]) ReaderIOEither[[]OP] {
+	return RIOE.MonadMap(rioe, pickListItems[O, OL, OP, OLP])
+}
+
+func pickListItems[O any, OL any, OP ObjectPointer[O], OLP ObjectListPointer[OL]](list OLP) []OP {
+	out := make([]OP, 0)
+	_ = apimeta.EachListItem(list, func(o runtime.Object) error {
+		// EachListItem yields pointers to the items; cast to OP (*T)
+		if x, ok := o.(OP); ok {
+			out = append(out, x)
+		}
+		return nil
+	})
+	return out
 }
 
 // CreateParams contains parameters for Create operations.
